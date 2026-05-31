@@ -1,0 +1,126 @@
+name: Batch Download Tencent Videos
+
+on:
+  workflow_dispatch:
+    inputs:
+      quality:
+        description: 'Video quality (best/1080p/720p/480p)'
+        required: false
+        default: 'best'
+      cookies_file:
+        description: 'Use cookies from secret? (yes/no)'
+        required: false
+        default: 'no'
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: batch1
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/o0034z52rj3.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/b0034mmzkvt.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/d00347ymct3.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/n0034ytymsd.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/w0034ehxlyx.html
+          - id: batch2
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/s0034sjhecj.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/g0034jf8zsy.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/t0034b10wd0.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/s0034uah4zt.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/k0034t4ou27.html
+          - id: batch3
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/o0034n55en6.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/f0034vwgzay.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/j00340o06d4.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/o0034abku58.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/w0034v9mb1y.html
+          - id: batch4
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/q00340by6av.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/z0034043pn7.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/t0034nb791w.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/g0034emwb99.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/g00345775jl.html
+          - id: batch5
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/a0034vxfw0e.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/h00343crnhh.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/i00340196vx.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/u00342dcocp.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/g0034dsrj19.html
+          - id: batch6
+            urls: |
+              https://v.qq.com/x/cover/mzc002009a3e8xj/m0034v1a9m4.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/b0034supb6e.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/i0034bpkp7e.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/v0034yr77tx.html
+              https://v.qq.com/x/cover/mzc002009a3e8xj/a0034caivsz.html
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y aria2
+          pip install -U yt-dlp
+
+      - name: Write cookies file
+        if: ${{ github.event.inputs.cookies_file == 'yes' }}
+        run: echo "${{ secrets.QQVIDEO_COOKIES }}" > cookies.txt
+
+      - name: Write URL list
+        run: echo "${{ matrix.urls }}" > urls.txt
+
+      - name: Download videos
+        run: |
+          mkdir -p downloads
+
+          COOKIES_ARG=""
+          if [ "${{ github.event.inputs.cookies_file }}" = "yes" ] && [ -f cookies.txt ]; then
+            COOKIES_ARG="--cookies cookies.txt"
+          fi
+
+          QUALITY="${{ github.event.inputs.quality }}"
+          if [ "$QUALITY" = "best" ]; then
+            FORMAT_ARG="-f bestvideo+bestaudio/best"
+          else
+            FORMAT_ARG="-f bestvideo[height<=${QUALITY%p}]+bestaudio/best[height<=${QUALITY%p}]"
+          fi
+
+          yt-dlp \
+            $COOKIES_ARG \
+            $FORMAT_ARG \
+            --downloader aria2c \
+            --downloader-args "aria2c:-x 16 -s 16 -k 1M --max-connection-per-server=16" \
+            --merge-output-format mp4 \
+            --output "downloads/%(title)s.%(ext)s" \
+            --no-warnings \
+            --ignore-errors \
+            --retries 5 \
+            --fragment-retries 5 \
+            --batch-file urls.txt \
+            2>&1 | tee download.log
+
+          echo "=== ${{ matrix.id }} Summary ==="
+          ls -lh downloads/
+
+      - name: Upload videos (${{ matrix.id }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos-${{ matrix.id }}
+          path: downloads/
+          retention-days: 3
+          if-no-files-found: warn
+
+      - name: Upload log (${{ matrix.id }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.id }}
+          path: download.log
+          retention-days: 7
